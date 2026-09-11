@@ -15,17 +15,99 @@ local function is_socket_active(remote_host)
 	return vim.v.shell_error == 0
 end
 
+-- Recursively parse an SSH config file (following Include directives) into
+-- a list of { host = "...", user = "..." } entries, keyed by seen[] to dedupe.
+local function parse_ssh_config_file(path, hosts, seen, visited)
+	path = vim.fn.expand(path)
+	if visited[path] or vim.fn.filereadable(path) == 0 then
+		return
+	end
+	visited[path] = true
+
+	local current_hosts = {}
+	for _, line in ipairs(vim.fn.readfile(path)) do
+		local trimmed = line:match("^%s*(.-)%s*$")
+		if trimmed ~= "" and not trimmed:match("^#") then
+			local key, value = trimmed:match("^(%S+)%s+(.+)$")
+			if key then
+				local lkey = key:lower()
+				if lkey == "host" then
+					current_hosts = {}
+					for pattern in value:gmatch("%S+") do
+						-- Skip wildcard/negated patterns; only exact hostnames are useful for completion
+						if not pattern:find("[%*%?]") and not pattern:find("^!") then
+							table.insert(current_hosts, pattern)
+							if not seen[pattern] then
+								seen[pattern] = { host = pattern }
+								table.insert(hosts, seen[pattern])
+							end
+						end
+					end
+				elseif lkey == "user" then
+					for _, h in ipairs(current_hosts) do
+						if seen[h] then
+							seen[h].user = value
+						end
+					end
+				elseif lkey == "include" then
+					for pattern in value:gmatch("%S+") do
+						local include_path = pattern
+						if not include_path:match("^[~/]") then
+							include_path = vim.fs.dirname(path) .. "/" .. include_path
+						end
+						for _, f in ipairs(vim.fn.glob(vim.fn.expand(include_path), false, true)) do
+							parse_ssh_config_file(f, hosts, seen, visited)
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+-- Cache parsed ~/.ssh/config entries, invalidated when the file's mtime changes
+local ssh_config_cache = { hosts = nil, mtime = nil }
+local function get_ssh_config_hosts()
+	local config_path = vim.fn.expand("~/.ssh/config")
+	local mtime = vim.fn.getftime(config_path)
+	if ssh_config_cache.hosts == nil or ssh_config_cache.mtime ~= mtime then
+		local hosts = {}
+		parse_ssh_config_file(config_path, hosts, {}, {})
+		ssh_config_cache.hosts = hosts
+		ssh_config_cache.mtime = mtime
+	end
+	return ssh_config_cache.hosts
+end
+
 -- Global completion function exposed to Neovim's completion engine
 _G.RemotePatchComplete = function(arg_lead, _, _)
 	local remote_host, path_prefix = arg_lead:match("^([^:]+):(.*)$")
 	if not remote_host then
-		if vim.g.last_remote_patch_spec then
-			local last_host = vim.g.last_remote_patch_spec:match("^([^:]+):")
-			if last_host and last_host:sub(1, #arg_lead) == arg_lead then
-				return { last_host .. ":" }
+		local candidates = {}
+		local added = {}
+
+		local function add_candidate(spec)
+			if spec ~= "" and not added[spec] and spec:sub(1, #arg_lead) == arg_lead then
+				added[spec] = true
+				table.insert(candidates, spec .. ":")
 			end
 		end
-		return {}
+
+		if vim.g.last_remote_patch_spec then
+			local last_host = vim.g.last_remote_patch_spec:match("^([^:]+):")
+			if last_host then
+				add_candidate(last_host)
+			end
+		end
+
+		for _, entry in ipairs(get_ssh_config_hosts()) do
+			if entry.user then
+				add_candidate(entry.user .. "@" .. entry.host)
+			end
+			add_candidate(entry.host)
+		end
+
+		return candidates
 	end
 
 	local search_path = path_prefix
