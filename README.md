@@ -12,7 +12,7 @@ confirm → delete the remote backup and the local .patch
 ## Install (LazyVim)
 
 ```sh
-curl -fsSL https://git.fferrando.cc/rdfilippo/RemotePatch/raw/branch/main/install.sh | bash
+curl -fsSL https://git.fferrando.cc/rdfilippo/remote-patch/raw/branch/main/install.sh | bash
 ```
 
 Other ways to run it:

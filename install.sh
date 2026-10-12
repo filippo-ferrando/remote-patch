@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Install remote-patch into a LazyVim config as lua/plugins/remote-patch.lua.
-#   curl -fsSL https://git.fferrando.cc/rdfilippo/RemotePatch/raw/branch/main/install.sh | bash
+#   curl -fsSL https://git.fferrando.cc/rdfilippo/remote-patch/raw/branch/main/install.sh | bash
 #   ./install.sh               # from a checkout: use it in place (dir = ...)
 #   ./install.sh <git-url>     # or: curl ... | bash -s -- <git-url>
 set -euo pipefail
 
 # Wrapped in main so a truncated `curl | bash` download runs nothing
 main() {
-  repo_url="${REMOTE_PATCH_REPO:-https://git.fferrando.cc/rdfilippo/RemotePatch}"
+  repo_url="${REMOTE_PATCH_REPO:-https://git.fferrando.cc/rdfilippo/remote-patch}"
   src="${BASH_SOURCE[0]:-}"
   nvim_cfg="${XDG_CONFIG_HOME:-$HOME/.config}/${NVIM_APPNAME:-nvim}"
   target="$nvim_cfg/lua/plugins/remote-patch.lua"
