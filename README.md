@@ -3,11 +3,26 @@
 Edit a remote file locally in Neovim, then push the change to the host as a patch over SSH. Each step can be undone.
 
 ```
+pull    → load the remote file into the buffer and record it as the base
+diff    → show buffer vs remote side by side in a float (delta, or native diff mode)
 create  → diff the current buffer (unsaved edits included) against the remote file → <file>.patch (opens in a split)
-apply   → dry-run, then `patch -b` on the remote (keeps <file>.orig)
+apply   → dry-run, then `patch -b` on the remote (keeps <file>.orig; refused while a .orig is pending)
 revert  → restore <file>.orig
 confirm → delete the remote backup and the local .patch
+merge   → resolve buffer vs remote: choose local, choose remote or 3-way merge
 ```
+
+### Conflicts
+
+The **base** is the remote content your edits started from. `pull`, `apply` and `revert` update it. The first `create` on a file sets it if there isn't one yet.
+If the remote no longer matches the base, `create` and `apply` stop and offer:
+
+- **View diff**: the side-by-side float, then back to this menu.
+- **Choose local**: keep your buffer. The remote's changes will be overwritten.
+- **Choose remote**: replace the buffer with the remote (undo with `u`).
+- **Merge**: `git merge-file` 3-way merge. Non-overlapping changes merge automatically. Real conflicts open a float with remote | result: `co`/`ct`/`cb` take local/remote/both, `]x`/`[x` jump between conflicts, `:w` accepts, `q` cancels. Native `do`/`]c` work too.
+
+Then you pick where the result goes: **local buffer** only (run create/apply when ready), or **local buffer + remote** (create and apply right away).
 
 ## Install (LazyVim)
 
@@ -24,21 +39,24 @@ curl -fsSL .../install.sh | bash -s -- <git-url>   # clone from another repo (or
 
 This writes `~/.config/nvim/lua/plugins/remote-patch.lua`. If that file already exists, it is backed up to `.bak` first.
 
-You need `ssh`, `diff` and `patch` on the remote. Password auth also needs `sshpass`.
+You need `ssh`, `diff` and `patch` on the remote. Password auth also needs `sshpass`. The 3-way merge needs `git` locally, and the diff float uses [`delta`](https://github.com/dandavison/delta) when it's installed.
 
 ## Usage
 
 | Key          | Action                         |
 |--------------|--------------------------------|
-| `<leader>Rr` | Action menu                    |
-| `<leader>RR` | Action menu, ask for password  |
+| `<leader>Rr` | Remote actions                 |
+| `<leader>RR` | Remote actions (password)      |
+| `<leader>Rp` | Pull                           |
+| `<leader>Rd` | Diff (float)                   |
 | `<leader>Rc` | Create patch                   |
 | `<leader>Ra` | Apply                          |
 | `<leader>Ru` | Revert                         |
 | `<leader>Rk` | Confirm                        |
+| `<leader>Rm` | Merge                          |
 | `<leader>Rt` | Set remote target              |
 
-`:RemotePatch[!] [create|apply|revert|confirm|target] [user@host:/path]`
+`:RemotePatch[!] [pull|diff|create|apply|revert|confirm|merge|target] [user@host:/path]`
 
 - The target is remembered per local file, even after a restart. A new file gets a suggested target: the last host and directory you used, plus the new file's name.
 - `<Tab>` completes hosts from `~/.ssh/config` (including `Include`d files), then remote paths.
@@ -51,6 +69,7 @@ You need `ssh`, `diff` and `patch` on the remote. Password auth also needs `sshp
 opts = {
   ssh_opts = { ... }, -- replaces the defaults (see lua/remote-patch/init.lua)
   open_patch = true,  -- open the patch in a split after create
+  keys = true,        -- set the <leader>R keymaps and which-key group
 }
 ```
 

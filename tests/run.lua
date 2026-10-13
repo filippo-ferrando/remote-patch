@@ -25,4 +25,20 @@ assert(seen.web.user == "deploy" and seen.db.user == "deploy" and seen.extra.use
 -- command completion: actions first, then hosts
 local c = rp.complete_cmd("cr", "RemotePatch cr", 14)
 assert(c[1] == "create", vim.inspect(c))
+
+-- buffer text round trip (dos line endings, trailing newline)
+local b = vim.api.nvim_create_buf(false, true)
+vim.bo[b].fileformat = "dos"
+rp._set_buf_text(b, "a\r\nb\r\n")
+assert(rp._buf_text(b) == "a\r\nb\r\n", vim.inspect(rp._buf_text(b)))
+
+-- conflict block under cursor -> local / remote / both
+local conflict = { "x", "<<<<<<< local", "L", "=======", "R", ">>>>>>> remote", "y" }
+for which, want in pairs({ ["local"] = "x L y", remote = "x R y", both = "x L R y" }) do
+	vim.api.nvim_buf_set_lines(0, 0, -1, false, conflict)
+	vim.api.nvim_win_set_cursor(0, { 3, 0 })
+	rp._take(which)
+	local got = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), " ")
+	assert(got == want, which .. ": " .. got)
+end
 print("ok")

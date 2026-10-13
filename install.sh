@@ -24,6 +24,8 @@ main() {
     }
   done
   command -v sshpass >/dev/null || echo "Note: install 'sshpass' for password (non-key) auth."
+  command -v git >/dev/null || echo "Note: install 'git' for 3-way merge."
+  command -v delta >/dev/null || echo "Note: install 'delta' for the side-by-side diff view (falls back to native diff)."
 
   if [ $# -gt 0 ]; then
     source_line="url = \"$1\","
@@ -45,26 +47,8 @@ return {
 		$source_line
 		name = "remote-patch",
 		main = "remote-patch",
-		cmd = "RemotePatch",
+		event = "VeryLazy", -- setup() registers the <leader>R keymaps
 		opts = {},
-		keys = {
-			{ "<leader>Rr", "<cmd>RemotePatch<cr>", desc = "Menu" },
-			{ "<leader>RR", "<cmd>RemotePatch!<cr>", desc = "Menu (password)" },
-			{ "<leader>Rc", "<cmd>RemotePatch create<cr>", desc = "Create patch" },
-			{ "<leader>Ra", "<cmd>RemotePatch apply<cr>", desc = "Apply patch" },
-			{ "<leader>Ru", "<cmd>RemotePatch revert<cr>", desc = "Revert (undo apply)" },
-			{ "<leader>Rk", "<cmd>RemotePatch confirm<cr>", desc = "Confirm (keep change)" },
-			{ "<leader>Rt", "<cmd>RemotePatch target<cr>", desc = "Set remote target" },
-		},
-	},
-	{
-		"folke/which-key.nvim",
-		optional = true,
-		opts = {
-			spec = {
-				{ "<leader>R", group = "remote patch", icon = { icon = "󰒍 ", color = "cyan" } },
-			},
-		},
 	},
 }
 EOF
