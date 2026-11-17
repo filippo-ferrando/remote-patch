@@ -1,0 +1,232 @@
+*remote-patch.txt*  Edit remote files locally, push changes as patches over SSH
+
+==============================================================================
+CONTENTS                                               *remote-patch-contents*
+
+  1. Introduction ............................ |remote-patch-intro|
+  2. Requirements ............................ |remote-patch-requirements|
+  3. Setup ................................... |remote-patch-setup|
+  4. Workflow ................................ |remote-patch-workflow|
+  5. Command ................................. |:RemotePatch|
+  6. Actions ................................. |remote-patch-actions|
+  7. Conflicts ............................... |remote-patch-conflicts|
+  8. Merge view .............................. |remote-patch-merge-view|
+  9. Keymaps ................................. |remote-patch-keymaps|
+ 10. Options ................................. |remote-patch-options|
+ 11. Files ................................... |remote-patch-files|
+
+==============================================================================
+1. INTRODUCTION                            *remote-patch* *remote-patch-intro*
+
+remote-patch lets you edit a remote file in a normal local buffer, then ship
+the change to the host as a unified diff applied with `patch` over SSH.
+
+Every change is a reviewable `.patch` file. It is dry-run on the remote before
+anything is written, a `.orig` backup is kept until you confirm, and if the
+remote moved while you were editing you are asked what to do.
+
+==============================================================================
+2. REQUIREMENTS                                    *remote-patch-requirements*
+
+Local:
+  - Neovim 0.11 or later
+  - `ssh`, `diff`
+  - optional: `sshpass` (password auth), `git` (3-way merge),
+    `delta` (side-by-side diff view; native diff mode otherwise),
+    which-key.nvim (labels the <leader>R group)
+
+Remote:
+  - POSIX `sh`, `patch`, `mktemp`, `cat`, `mv`, `rm`, `ls`
+  - write access to the file and its directory (for the `.orig` backup)
+
+==============================================================================
+3. SETUP                                                  *remote-patch-setup*
+
+lazy.nvim: >lua
+    {
+      url = "https://git.fferrando.cc/rdfilippo/remote-patch",
+      name = "remote-patch",
+      main = "remote-patch",
+      event = "VeryLazy",
+      opts = {},
+    }
+<
+Other plugin managers: >lua
+    require("remote-patch").setup({})
+<
+`setup()` creates |:RemotePatch| and, unless `keys = false`, the keymaps.
+LazyVim users can also run the `install.sh` script from the repository.
+
+==============================================================================
+4. WORKFLOW                                            *remote-patch-workflow*
+
+  1. Open the local file, or an empty buffer with a name (`:e nginx.conf`).
+  2. `:RemotePatch pull` and enter a target such as
+     `root@web:/etc/nginx/nginx.conf`. <Tab> completes hosts and paths.
+  3. Edit. Saving is optional, the buffer content is what gets diffed.
+  4. `:RemotePatch create` and review the patch in the split.
+  5. `:RemotePatch apply`. The remote keeps `nginx.conf.orig`.
+  6. `:RemotePatch confirm` to keep the change, or `:RemotePatch revert`.
+
+Only one change can be pending per remote file: after `apply`, `confirm` or
+`revert` before the next `apply`.
+
+==============================================================================
+5. COMMAND                                                      *:RemotePatch*
+
+:RemotePatch[!] [{action}] [{target}]
+
+  {action}  one of the |remote-patch-actions|. Omitted: open a menu.
+  {target}  `user@host:/path`. Host can be any `ssh` destination, including
+            `~/.ssh/config` aliases. The path may start with `~/`.
+            Given: saved as the target for the current file.
+            Omitted: use the saved target, or ask for one.
+
+`:RemotePatch user@host:/path` (no action) sets the target and opens the menu.
+
+With [!], ask for the password up front, unless an SSH connection to the host
+is already open. Without it, key auth is tried first and a password is asked
+only if the host refuses it.
+
+Completion: actions, then hosts from history and `~/.ssh/config` (following
+`Include`), then remote paths after `host:`. Path completion needs key auth
+or an open connection and waits up to 2 seconds for the host.
+
+The target is remembered per local file across restarts. A file without one
+gets a suggestion: the last host and directory used, plus this file's name.
+
+Run from the `.patch` split, actions apply to the file the patch belongs to.
+
+==============================================================================
+6. ACTIONS                                              *remote-patch-actions*
+
+pull                                                       *remote-patch-pull*
+    Fetch the remote file. If the buffer is empty or unchanged since the last
+    pull, replace it and record the remote as the base. Otherwise open the
+    |remote-patch-conflicts| menu.
+
+diff                                                       *remote-patch-diff*
+    Read-only side-by-side float of buffer vs remote. Uses `delta` when
+    installed, native diff mode otherwise. `q` closes.
+
+create                                                   *remote-patch-create*
+    Diff the buffer (unsaved edits included) against the current remote file
+    and write `<file>.patch` next to the local file. Opens it in a split when
+    |remote-patch-open_patch| is set. Stops with the conflict menu if the
+    remote no longer matches the base.
+
+apply                                                     *remote-patch-apply*
+    Send the `.patch` file on disk to the remote. Re-run `create` after
+    further edits. Runs `patch --dry-run` first, then `patch -b`, which keeps
+    `<file>.orig`. Refused while a `.orig` exists. On failure the remote is
+    left untouched. Stops with the conflict menu if the remote no longer
+    matches the base.
+
+revert                                                   *remote-patch-revert*
+    Move `<file>.orig` back over the remote file. The local buffer is not
+    changed.
+
+confirm                                                 *remote-patch-confirm*
+    Delete the remote `<file>.orig` and the local `.patch`, and close its
+    buffer.
+
+merge                                                     *remote-patch-merge*
+    Open the |remote-patch-conflicts| menu on demand.
+
+target                                                   *remote-patch-target*
+    Change the remote target saved for the current file.
+
+==============================================================================
+7. CONFLICTS                      *remote-patch-conflicts* *remote-patch-base*
+
+The base is the remote content your edits started from, stored per local
+file and target. `pull`, `apply`, `revert` and "Choose remote" update it, and
+so does resolving with "Choose local" or "Merge". The first `create` sets it
+if there isn't one.
+
+When the remote no longer matches the base, `create` and `apply` stop and
+offer:
+
+  View diff      the side-by-side float, then back to this menu
+  Choose local   keep the buffer; the remote's changes will be overwritten
+  Choose remote  replace the buffer with the remote (undo with |u|)
+  Merge          `git merge-file` 3-way merge (base, local, remote).
+                 Non-overlapping changes merge automatically; real
+                 conflicts open the |remote-patch-merge-view|.
+
+After "Choose local" or "Merge", choose where the result goes:
+
+  Local buffer           only update the buffer; create/apply when ready
+  Local buffer + remote  update the buffer, then create and apply right away
+
+==============================================================================
+8. MERGE VIEW                                        *remote-patch-merge-view*
+
+Two floats: remote (read-only) on the left, the editable result on the right.
+
+  co      take local for the conflict under the cursor
+  ct      take remote
+  cb      take both (local, then remote)
+  ]x [x   next / previous conflict
+  :w      accept the result (refused while conflict markers remain)
+  q       cancel
+
+Native |diff-mode| commands (|do|, |dp|, |]c|, |[c|) work too.
+
+Without a base there is nothing to 3-way merge from: the view opens directly
+with the buffer as the result and no conflict markers.
+
+==============================================================================
+9. KEYMAPS                                              *remote-patch-keymaps*
+
+  <leader>Rr  action menu            <leader>Ra  apply
+  <leader>RR  action menu (password) <leader>Ru  revert
+  <leader>Rp  pull                   <leader>Rk  confirm
+  <leader>Rd  diff                   <leader>Rm  merge
+  <leader>Rc  create                 <leader>Rt  set target
+
+Disable with `keys = false` and map |:RemotePatch| yourself.
+
+==============================================================================
+10. OPTIONS                                             *remote-patch-options*
+
+Pass to `setup()` (or lazy.nvim `opts`). Merged shallowly.
+
+                                                       *remote-patch-ssh_opts*
+ssh_opts  (list)
+    Extra `ssh` arguments. Replaces the default list entirely. Default: >lua
+        {
+          "-o", "ControlMaster=auto",
+          "-o", "ControlPath=~/.ssh/cm_%r_%h_%p",
+          "-o", "ControlPersist=15m",
+          "-o", "ConnectTimeout=5",
+          "-o", "StrictHostKeyChecking=accept-new",
+          "-o", "IgnoreUnknown=WarnWeakCrypto",
+          "-o", "WarnWeakCrypto=no-pq-kex",
+        }
+<
+    Keep the ControlMaster options: they make completion fast and avoid
+    asking for a password on every action. `accept-new` trusts unknown host
+    keys on first connect. Remove it to make ssh refuse them.
+
+                                                     *remote-patch-open_patch*
+open_patch  (boolean, default true)
+    Open the generated patch in a split after `create`.
+
+                                                           *remote-patch-keys*
+keys  (boolean, default true)
+    Create the <leader>R keymaps and the which-key group.
+
+==============================================================================
+11. FILES                                                 *remote-patch-files*
+
+  <local file>.patch                    generated patch, removed by `confirm`
+  <remote file>.orig                    remote backup after `apply`
+  stdpath("data")/remote-patch.json     saved targets
+  stdpath("data")/remote-patch/bases/   base snapshots per file and target
+  ~/.ssh/cm_*                           SSH ControlMaster sockets
+
+Passwords are never written to disk. They are kept for the current action
+only, and passed to `sshpass` through the environment.
+
+ vim:tw=78:ts=8:ft=help:norl:
